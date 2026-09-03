@@ -1,0 +1,34 @@
+@baseUrl = http://localhost:8080/api/v1
+@email = subscriber
+
+### Request a subscription
+# @name requestSubscription
+POST {{baseUrl}}/subscription
+Accept: application/json
+Content-Type: application/json
+
+{
+  "email": "{{email}}"
+}
+
+### Confirm a subscription
+# @name confirmSubscription
+# @prompt confirmationToken 
+POST {{baseUrl}}/subscription/confirm?token={{confirmationToken}}
+Accept: application/json
+
+### Request an unsubscription
+# @name requestUnsubscription
+POST {{baseUrl}}/unsubscription
+Accept: application/json
+Content-Type: application/json
+
+{
+  "email": "{{email}}"
+}
+
+### Confirm an unsubscription
+# @name confirmUnsubscription
+# @prompt unsubscriptionToken
+POST {{baseUrl}}/unsubscription/confirm?token={{unsubscriptionToken}}
+Accept: application/json
