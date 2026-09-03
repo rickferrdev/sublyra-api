@@ -1,4 +1,4 @@
-# sublyra-api — technical documentation
+# 📬 sublyra-api — technical documentation
 
 `sublyra-api` is a study project for reliable, asynchronous subscription workflows. It exposes an HTTP API for newsletter opt-in and opt-out, persists subscription state in MongoDB, and records the corresponding integration event using the **Transactional Outbox** pattern.
 

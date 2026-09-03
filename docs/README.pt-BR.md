@@ -1,4 +1,4 @@
-# sublyra-api — documentação técnica
+# 📬 sublyra-api — documentação técnica
 
 `sublyra-api` é um projeto de estudo sobre fluxos confiáveis e assíncronos de inscrição. Ele oferece uma API HTTP para inscrição e cancelamento de newsletters, persiste o estado das inscrições no MongoDB e registra o evento de integração correspondente usando o padrão **Transactional Outbox**.
 
