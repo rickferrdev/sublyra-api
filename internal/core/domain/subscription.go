@@ -55,6 +55,7 @@ type OutboxSubscription struct {
 
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+	LastError string    `json:"last_error"`
 }
 
 func (subscription *Subscription) IsSubscribed() bool {
@@ -89,27 +90,24 @@ func (subscription *Subscription) CompareTokenUnsubscribe(token string) bool {
 }
 
 func (outbox *OutboxSubscription) IsPending() bool {
-	return outbox.Event == EventOutboxSubscriptionConfirmationRequested
+	return outbox.Status == OutboxSubscriptionStatusPending
 }
 
-func (outbox *OutboxSubscription) IsCompleted() bool {
-	return outbox.Event == EventOutboxSubscriptionCancellationRequested
+func (outbox *OutboxSubscription) IsPublished() bool {
+	return outbox.Status == OutboxSubscriptionStatusPublished
 }
 
-func (outbox *OutboxSubscription) MarkAsCompleted() {
-	outbox.Event = EventOutboxSubscriptionCancellationRequested
+func (outbox *OutboxSubscription) MarkAsPublished() {
+	outbox.Status = OutboxSubscriptionStatusPublished
+	outbox.PublishedAt = time.Now()
 }
 
-func (outbox *OutboxSubscription) IncrementAttempts() {
-	outbox.Attempts++
+func (outbox *OutboxSubscription) MarkAsFailed() {
+	outbox.Status = OutboxSubscriptionStatusFailed
 }
 
 func (outbox *OutboxSubscription) MarkAsPending() {
-	outbox.Event = EventOutboxSubscriptionConfirmationRequested
-}
-
-func (outbox *OutboxSubscription) CanIncrementAttempts(maxAttempts int) bool {
-	return outbox.Attempts < maxAttempts
+	outbox.Status = OutboxSubscriptionStatusPending
 }
 
 func (subscription *Subscription) CooldownUnsubscription() error {
@@ -118,4 +116,16 @@ func (subscription *Subscription) CooldownUnsubscription() error {
 		return ports.Conflict(fmt.Errorf("subscription can only renewed after %s", availableAt.Format((time.RFC3339))))
 	}
 	return nil
+}
+
+func (outbox *OutboxSubscription) IsCancelled() bool {
+	return outbox.Event == EventOutboxSubscriptionCancellationRequested
+}
+
+func (outbox *OutboxSubscription) IncrementAttempts() {
+	outbox.Attempts++
+}
+
+func (outbox *OutboxSubscription) CanIncrementAttempts(maxAttempts int) bool {
+	return outbox.Attempts < maxAttempts
 }

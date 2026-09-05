@@ -151,6 +151,16 @@ make lint   # golangci-lint run
 make build  # compila bin/api
 ```
 
+## Testes
+
+Execute a suíte de testes unitários com:
+
+```bash
+go test ./... -count=1 -cover
+```
+
+A suíte atual cobre transições de estado e regras de cooldown do domínio, validação de JWT, construção dos documentos da outbox e os principais cenários do serviço de inscrições usando doubles leves. O comportamento das transações do MongoDB exige o ambiente com replica set e não faz parte da suíte unitária.
+
 O Docker Compose compila a API e provisiona o MongoDB 8.0 como um replica set de nó único. O healthcheck do MongoDB inicializa `rs0`, e a API aguarda até que o nó se torne primário. Dentro da rede do Compose, `MONGO_URI` é sobrescrita automaticamente para usar o serviço `mongo`:
 
 ```bash
@@ -179,8 +189,8 @@ Cuidados de confiabilidade que devem ser preservados durante a implementação:
 ## Limitações atuais
 
 - Ainda não existe um relay de polling/CDC para a outbox.
-- RabbitMQ e Resend não estão conectados à aplicação.
-- Atualmente não existem testes automatizados.
+- RabbitMQ possui conexão, topologia e publisher configurados; o relay da outbox e o consumer de e-mail ainda não foram conectados ao fluxo.
+- Testes automatizados de integração com o MongoDB ainda não foram implementados.
 - O ambiente do Compose usa apenas um membro do replica set MongoDB e, portanto, não oferece alta disponibilidade para produção.
 - Limpeza, retenção e reivindicação concorrente de eventos da outbox ainda não foram implementadas.
 - A observabilidade está limitada aos logs HTTP e da aplicação.

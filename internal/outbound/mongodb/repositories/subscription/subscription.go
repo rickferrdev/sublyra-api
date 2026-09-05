@@ -34,6 +34,11 @@ type Interface interface {
 	InsertWithOutbox(ctx context.Context, event domain.OutboxSubscriptionEvent, subscription domain.Subscription) error
 	RenewConfirmationWithOutbox(ctx context.Context, event domain.OutboxSubscriptionEvent, email, confirmation string) error
 	RenewUnsubscribedWithOutbox(ctx context.Context, event domain.OutboxSubscriptionEvent, email, confirmation string) error
+
+	FindPendingOutbox(ctx context.Context, limit int) ([]domain.OutboxSubscription, error)
+	MarkPublished(ctx context.Context, id string, publishedAt time.Time) error
+	MarkFailed(ctx context.Context, id string, reason string) error
+	IncrementAttempts(ctx context.Context, id string) error
 }
 
 type FxParams struct {
@@ -41,7 +46,7 @@ type FxParams struct {
 	Client *mongo.Client
 }
 
-func New(params FxParams) Interface {
+func New(params FxParams) *Database {
 	subscription := params.Client.Database(SUBSCRIPTIONS_DATABASE).Collection(SUBSCRIPTIONS_COLLECTION)
 	outbox := params.Client.Database(SUBSCRIPTIONS_DATABASE).Collection(OUTBOX_COLLECTION)
 	database := &Database{
@@ -119,9 +124,6 @@ func (database *Database) Update(ctx context.Context, email string, update Subsc
 	}
 	res, err := database.subscriptions.UpdateOne(ctx, filter, document)
 	if err != nil {
-		if errors.Is(err, mongo.ErrNoDocuments) {
-			return NotFoundError(err)
-		}
 		return InternalError(err)
 	}
 	if !res.Acknowledged {
@@ -145,9 +147,6 @@ func (database *Database) Delete(ctx context.Context, email string) error {
 	}
 	res, err := database.subscriptions.DeleteOne(ctx, filter)
 	if err != nil {
-		if errors.Is(err, mongo.ErrNoDocuments) {
-			return NotFoundError(err)
-		}
 		return InternalError(err)
 	}
 	if !res.Acknowledged {
@@ -222,9 +221,6 @@ func (database *Database) RenewConfirmation(ctx context.Context, email, token st
 	}
 	res, err := database.subscriptions.UpdateOne(ctx, filter, document)
 	if err != nil {
-		if errors.Is(err, mongo.ErrNoDocuments) {
-			return NotFoundError(err)
-		}
 		return InternalError(err)
 	}
 	if !res.Acknowledged {
@@ -255,9 +251,6 @@ func (database *Database) RenewUnsubscribed(ctx context.Context, email, token st
 	}
 	res, err := database.subscriptions.UpdateOne(ctx, filter, document)
 	if err != nil {
-		if errors.Is(err, mongo.ErrNoDocuments) {
-			return NotFoundError(err)
-		}
 		return InternalError(err)
 	}
 	if !res.Acknowledged {
@@ -358,4 +351,135 @@ func (database *Database) InsertWithOutbox(ctx context.Context, event domain.Out
 		return nil, nil
 	})
 	return err
+}
+
+// FindPendingOutbox retrieves pending outbox events ordered from oldest to
+// newest. A result with no events is returned nil and nil, not an error.
+//
+// It may return:
+//   - ports.CodeInternal when MongoDB cannot execute or decode the query;
+//   - ObjectIDInvalid when a stored outbox ID or AggregateID is empty.
+func (database *Database) FindPendingOutbox(ctx context.Context, limit int) ([]domain.OutboxSubscription, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	opts := options.Find().SetLimit(int64(limit)).SetSort(bson.D{
+		{Key: "created_at", Value: 1},
+	})
+	filter := bson.M{
+		"status": domain.OutboxSubscriptionStatusPending,
+	}
+	cursor, err := database.outbox.Find(ctx, filter, opts)
+	if err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return nil, nil
+		}
+		return nil, InternalError(err)
+	}
+	defer cursor.Close(ctx)
+	var schemas []OutboxSubscriptionSchema
+	if err := cursor.All(ctx, &schemas); err != nil {
+		return nil, InternalError(err)
+	}
+	outboxes := make([]domain.OutboxSubscription, 0, len(schemas))
+	for _, outbox := range schemas {
+		domainOutbox, err := outbox.ToDomain()
+		if err != nil {
+			return nil, err
+		}
+		outboxes = append(outboxes, *domainOutbox)
+	}
+	return outboxes, nil
+}
+
+// MarkPublished changes a pending outbox event to published.
+//
+// It may return:
+//   - ObjectIDInvalid when id is not a valid BSON ObjectID;
+//   - CodeNotFound when no pending outbox event matches id;
+//   - ports.CodeInternal when MongoDB cannot update the document;
+//   - CodeNotAcknowledged when MongoDB does not acknowledge the operation.
+func (database *Database) MarkPublished(ctx context.Context, id string, publishedAt time.Time) error {
+	objectID, err := bson.ObjectIDFromHex(id)
+	if err != nil {
+		return ObjectIDInvalidError(err)
+	}
+	filter := bson.M{
+		"_id":    objectID,
+		"status": domain.OutboxSubscriptionStatusPending,
+	}
+	document := bson.M{
+		"$set": bson.M{
+			"status":       domain.OutboxSubscriptionStatusPublished,
+			"published_at": publishedAt,
+			"updated_at":   publishedAt,
+		},
+	}
+	res, err := database.outbox.UpdateOne(ctx, filter, document)
+	if err != nil {
+		return InternalError(err)
+	}
+	if !res.Acknowledged {
+		return NotAcknowledgedError(nil)
+	}
+	if res.MatchedCount == 0 {
+		return NotFoundError(nil)
+	}
+	return nil
+}
+
+func (database *Database) IncrementAttempts(ctx context.Context, id string) error {
+	objectID, err := bson.ObjectIDFromHex(id)
+	if err != nil {
+		return ObjectIDInvalidError(err)
+	}
+	filter := bson.M{
+		"_id":    objectID,
+		"status": domain.OutboxSubscriptionStatusPending,
+	}
+	document := bson.M{
+		"$inc": bson.M{
+			"attempts": 1,
+		},
+	}
+	res, err := database.outbox.UpdateOne(ctx, filter, document)
+	if err != nil {
+		return InternalError(err)
+	}
+	if !res.Acknowledged {
+		return NotAcknowledgedError(nil)
+	}
+	if res.MatchedCount == 0 {
+		return NotFoundError(nil)
+	}
+	return nil
+}
+
+func (database *Database) MarkFailed(ctx context.Context, id string, reason string) error {
+	objectID, err := bson.ObjectIDFromHex(id)
+	if err != nil {
+		return ObjectIDInvalidError(err)
+	}
+	filter := bson.M{
+		"_id":    objectID,
+		"status": domain.OutboxSubscriptionStatusPending,
+	}
+	document := bson.M{
+		"$set": bson.M{
+			"status":     domain.OutboxSubscriptionStatusFailed,
+			"updated_at": time.Now(),
+			"last_error": reason,
+		},
+	}
+	res, err := database.outbox.UpdateOne(ctx, filter, document)
+	if err != nil {
+		return InternalError(err)
+	}
+	if !res.Acknowledged {
+		return NotAcknowledgedError(nil)
+	}
+	if res.MatchedCount == 0 {
+		return NotFoundError(nil)
+	}
+	return nil
 }

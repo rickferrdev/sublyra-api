@@ -53,6 +53,7 @@ type (
 
 		CreatedAt time.Time `bson:"created_at"`
 		UpdatedAt time.Time `bson:"updated_at"`
+		LastError string    `bson:"last_error"`
 	}
 )
 
@@ -106,8 +107,9 @@ func NewOutboxSubscriptionSchema(subscription domain.Subscription, event domain.
 		Attempts:    0,
 		Payload:     payload,
 		PublishedAt: time.Time{},
-		CreatedAt:   subscription.CreatedAt,
-		UpdatedAt:   subscription.UpdatedAt,
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
+		LastError:   "",
 	}, nil
 }
 
@@ -152,5 +154,6 @@ func (schema *OutboxSubscriptionSchema) ToDomain() (*domain.OutboxSubscription, 
 		PublishedAt: schema.PublishedAt,
 		CreatedAt:   schema.CreatedAt,
 		UpdatedAt:   schema.UpdatedAt,
+		LastError:   schema.LastError,
 	}, nil
 }

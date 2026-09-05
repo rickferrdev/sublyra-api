@@ -21,10 +21,24 @@ func StartIndexes(params FxIndexesParams) {
 	params.Lifecycle.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error {
 			subscription := params.Client.Database(SUBSCRIPTIONS_DATABASE).Collection(SUBSCRIPTIONS_COLLECTION)
-			models := []mongo.IndexModel{
+			outbox := params.Client.Database(SUBSCRIPTIONS_DATABASE).Collection(OUTBOX_COLLECTION)
+			subscriptionModels := []mongo.IndexModel{
 				{Keys: bson.M{"email": 1}, Options: options.Index().SetName("subscriptions_email_unique").SetUnique(true)},
 			}
-			if _, err := subscription.Indexes().CreateMany(ctx, models); err != nil {
+			outboxModels := []mongo.IndexModel{
+				{
+					Keys: bson.D{
+						{Key: "status", Value: 1},
+						{Key: "attempts", Value: 1},
+						{Key: "created_at", Value: 1},
+					},
+					Options: options.Index().SetName("outbox_pending_attempts_created_at"),
+				},
+			}
+			if _, err := subscription.Indexes().CreateMany(ctx, subscriptionModels); err != nil {
+				return err
+			}
+			if _, err := outbox.Indexes().CreateMany(ctx, outboxModels); err != nil {
 				return err
 			}
 			return nil
