@@ -1,50 +1,63 @@
 # 📬 sublyra-api — documentação técnica
 
-`sublyra-api` é um projeto de estudo sobre fluxos confiáveis e assíncronos de inscrição. Ele oferece uma API HTTP para inscrição e cancelamento de newsletters, persiste o estado das inscrições no MongoDB e registra o evento de integração correspondente usando o padrão **Transactional Outbox**.
-
-> Escopo atual: o lado de escrita transacional está implementado. O relay da outbox, o publisher/consumer do RabbitMQ e o adapter de e-mail do Resend estão planejados, mas ainda não foram implementados.
+`sublyra-api` é um projeto de estudo sobre fluxos confiáveis e assíncronos de inscrição. Ele oferece uma API HTTP para inscrição e cancelamento de newsletters, persiste o estado das inscrições no MongoDB, registra eventos de integração usando o padrão **Transactional Outbox** e processa o envio assíncrono de e-mails via **RabbitMQ** e **Resend**.
 
 To read this documentation in English, see [`README.md`](README.md).
 
 ## Arquitetura
 
-O código segue uma estrutura inspirada em Ports and Adapters e usa Uber Fx para injeção de dependências e gerenciamento do ciclo de vida.
+O código segue uma estrutura inspirada em Ports and Adapters (Arquitetura Hexagonal) e usa Uber Fx para injeção de dependências e gerenciamento do ciclo de vida da aplicação.
 
 ```text
 cmd/api/                         ponto de entrada da aplicação
 internal/
 ├── config/                      configuração do ambiente
 ├── core/
-│   ├── domain/                  modelos de inscrição e outbox
-│   ├── ports/                   contrato de erros da aplicação
+│   ├── domain/                  modelos de inscrição, outbox e eventos de domínio
+│   ├── ports/                   contratos de erros da aplicação
 │   └── services/                casos de uso de inscrição
-├── inbound/http/rest/           controllers e middlewares Fiber
-├── outbound/mongodb/            repositórios e schemas MongoDB
-├── infra/                       servidor HTTP, logger e cliente MongoDB
+├── inbound/http/rest/           controllers, DTOs e middlewares Fiber
+├── infra/                       servidor HTTP, logger, MongoDB, RabbitMQ e mailer Resend
+├── outbound/
+│   ├── mongodb/                 repositórios e schemas MongoDB
+│   └── rabbitmq/                topologia RabbitMQ, publisher e workers assíncronos (relay, email)
 └── platform/                    utilitários de JWT e validação
 ```
 
-O fluxo de dependências é:
+O fluxo de dados é assíncrono e resiliente:
 
 ```text
-requisição HTTP → controller Fiber → serviço de inscrição → repositório MongoDB
-                                                           ├─ subscriptions
-                                                           └─ outbox
+Requisição HTTP → Controller Fiber → Serviço de Inscrição → Repositório MongoDB
+                                                             ├─ subscriptions
+                                                             └─ outbox (pending)
+                                                                     │
+                                                                     ▼
+                                                             Outbox Relay Worker
+                                                                     │
+                                                                     ▼
+                                                             Exchange RabbitMQ (sublyra.events)
+                                                                     │
+                                                                     ▼
+                                                             Worker Consumer de E-mail
+                                                                     │
+                                                                     ▼
+                                                             API Resend (Mailer)
 ```
 
-Principais tecnologias: Go 1.26.3, Fiber v3, MongoDB Go Driver v2, Uber Fx e JWT.
+Principais tecnologias: Go 1.26.3, Fiber v3, MongoDB Go Driver v2, RabbitMQ (amqp091-go), Resend Go SDK, Uber Fx e JWT.
 
-## Transactional Outbox
+## Transactional Outbox e Pipeline Assíncrono
 
-O problema estudado aqui é o problema da escrita dupla. Uma solicitação de inscrição precisa atualizar o estado de negócio e, posteriormente, disparar um efeito externo, como o envio de um e-mail. Gravar no MongoDB e chamar diretamente um provedor de e-mail são duas operações independentes: uma pode ter sucesso enquanto a outra falha.
+O principal padrão estudado aqui é a solução do problema da escrita dupla (dual-write). Uma solicitação de inscrição precisa atualizar o estado de negócio e, posteriormente, disparar um efeito colateral externo (envio de e-mail). Gravar no MongoDB e chamar diretamente uma API externa são duas operações independentes: uma pode ter sucesso enquanto a outra falha.
 
-A implementação atual grava os dois documentos dentro de uma única transação do MongoDB:
+A implementação grava ambos os documentos dentro de uma única transação do MongoDB:
 
 1. O serviço cria ou atualiza um documento em `subscriptions.subscriptions`.
-2. Na mesma transação, adiciona um evento em `subscriptions.outbox`.
-3. O MongoDB confirma as duas operações ou desfaz ambas.
-4. Um relay futuro lerá os eventos pendentes da outbox e os publicará no RabbitMQ.
-5. Um consumer futuro usará o Resend para enviar o e-mail de confirmação ou cancelamento.
+2. Na mesma transação, adiciona um evento de integração em `subscriptions.outbox` com status `pending`.
+3. O MongoDB confirma ambas as operações de forma atômica ou desfaz ambas.
+4. O **Outbox Relay Worker** consulta continuamente eventos pendentes na outbox, atualiza seu status para `processing` e os publica no exchange do RabbitMQ (`sublyra.events`). Após a publicação com sucesso, o status do evento na outbox passa para `published`.
+5. O **Worker Consumer de E-mail** consome eventos da fila do RabbitMQ (`sublyra.email`), renderiza os templates HTML (`confirmation.html` ou `cancellation.html`) e envia os e-mails via **API Resend**.
+6. Após o envio bem-sucedido do e-mail, o status do evento na outbox é atualizado para `delivered`. Caso ocorra uma falha ou o limite de tentativas seja atingido, a mensagem é encaminhada para filas de retry/DLQ e marcada como `failed`.
 
 Os métodos transacionais são `InsertWithOutbox`, `RenewConfirmationWithOutbox` e `RenewUnsubscribedWithOutbox`, localizados no repositório MongoDB de inscrições.
 
@@ -79,21 +92,24 @@ O campo `email` possui um índice único.
   "_id": "ObjectId",
   "aggregate_id": "ObjectId da inscrição",
   "email": "person@example.com",
-  "event": "outbox_subscription_confirmation_requested",
+  "event": "outbox_subscription_confirmation_requested | outbox_subscription_cancellation_requested",
   "attempts": 0,
   "payload": {
     "email": "person@example.com",
     "status": "pending",
     "confirmation_token": "JWT"
   },
-  "status": "pending",
+  "status": "pending | processing | published | delivered | failed",
+  "last_error": "mensagem de erro opcional",
   "published_at": "datetime opcional",
   "created_at": "datetime",
   "updated_at": "datetime"
 }
 ```
 
-Os eventos suportados são `outbox_subscription_confirmation_requested` e `outbox_subscription_cancellation_requested`. O modelo de status define `pending`, `published` e `failed`; o processamento e as transições são trabalhos futuros.
+Eventos suportados:
+- `outbox_subscription_confirmation_requested`
+- `outbox_subscription_cancellation_requested`
 
 ## Ciclo de vida da inscrição
 
@@ -126,7 +142,25 @@ curl -i -X POST http://localhost:8080/api/v1/subscription \
 
 As respostas bem-sucedidas usam códigos de aplicação estáveis, como `SUBSCRIPTION_PENDING`, `SUBSCRIPTION_CONFIRMED`, `UNSUBSCRIPTION_PENDING` e `UNSUBSCRIPTION_CONFIRMED`.
 
-Atualmente, o servidor aplica logging das requisições, recuperação de panics, IDs de requisição e um rate limit em memória de três requisições a cada 30 segundos. A configuração de CORS e o guard de tokens ainda não estão ativos. Há requisições prontas para execução em [`.http/subscriptions.http`](../.http/subscriptions.http).
+Atualmente, o servidor aplica logging das requisições, recuperação de panics, IDs de requisição e um rate limit em memória de 3 requisições a cada 30 segundos. Há requisições prontas para execução em [`.http/subscriptions.http`](../.http/subscriptions.http).
+
+## Topologia RabbitMQ e Arquitetura de Mensageria
+
+A aplicação declara automaticamente a topologia de mensageria durante a inicialização:
+
+- **Exchanges**:
+  - `sublyra.events` (`direct`, durável): Exchange principal de eventos.
+  - `sublyra.retry` (`direct`, durável): Exchange de espera para retenção e retentativas com atraso (30s TTL).
+  - `sublyra.dlx` (`direct`, durável): Exchange Dead-Letter para mensagens irrecuperáveis ou que esgotaram tentativas.
+- **Queues**:
+  - `sublyra.email`: Fila ativa de consumo de e-mails (configurada com `x-dead-letter-exchange: sublyra.retry`).
+  - `sublyra.email.retry`: Fila temporária de retenção com `x-message-ttl: 30000` (30s) que redireciona de volta para `sublyra.events`.
+  - `sublyra.email.dlq`: Fila Dead-Letter para mensagens que falharam ou são inválidas.
+- **Routing Keys**:
+  - `subscription.confirmation.requested`
+  - `subscription.cancellation.requested`
+  - `subscription.email.retry`
+  - `subscription.dead`
 
 ## Configuração
 
@@ -134,9 +168,15 @@ Atualmente, o servidor aplica logging das requisições, recuperação de panics
 | --- | --- | --- | --- |
 | `SERVER_HOST` | não | `localhost` | Endereço de bind HTTP |
 | `SERVER_PORT` | não | `8080` | Porta HTTP |
-| `MONGO_URI` | sim | — | URI de conexão com um replica set MongoDB |
-| `JWT_SECRET_KEY` | sim | — | Assina os JWTs de confirmação e cancelamento |
-| `RESEND_SECRET_KEY` | atualmente sim | — | Reservada para o adapter planejado do Resend |
+| `MONGO_URI` | sim | — | URI de conexão com o replica set MongoDB |
+| `JWT_SECRET_KEY` | sim | — | Chave secreta para assinar os JWTs de confirmação e cancelamento |
+| `RABBITMQ_URI` | sim | — | URI de conexão AMQP com o RabbitMQ |
+| `RESEND_SECRET_KEY` | sim | — | Chave de API do Resend para envio de notificações por e-mail |
+| `RESEND_FROM_EMAIL` | não | `onboarding@resend.dev` | Endereço de remetente dos e-mails disparados |
+| `OUTBOX_POLL_INTERVAL` | não | `2s` | Intervalo de polling do relay da outbox |
+| `OUTBOX_BATCH_SIZE` | não | `50` | Tamanho máximo do lote de eventos buscados na outbox |
+| `OUTBOX_MAX_ATTEMPTS` | não | `5` | Número máximo de tentativas de reprocessamento antes de marcar evento como `failed` |
+| `RABBITMQ_PREFETCH` | não | `5` | Limite de prefetch do consumidor no canal do RabbitMQ |
 
 Não versione credenciais reais. Use valores locais em `.env` e mantenha apenas placeholders em `.env.example`.
 
@@ -144,7 +184,7 @@ Não versione credenciais reais. Use valores locais em `.env` e mantenha apenas 
 
 ```bash
 make run    # go run ./cmd/api
-make test   # go test ./...
+make test   # go test ./... -count=1
 make fmt    # go fmt ./...
 make tidy   # go mod tidy
 make lint   # golangci-lint run
@@ -159,38 +199,26 @@ Execute a suíte de testes unitários com:
 go test ./... -count=1 -cover
 ```
 
-A suíte atual cobre transições de estado e regras de cooldown do domínio, validação de JWT, construção dos documentos da outbox e os principais cenários do serviço de inscrições usando doubles leves. O comportamento das transações do MongoDB exige o ambiente com replica set e não faz parte da suíte unitária.
+A suíte de testes cobre a lógica do domínio, transições de estado, regras de cooldown, geração e validação de JWT, construção dos documentos da outbox, mappers de schema dos repositórios, declaração da topologia RabbitMQ e roteamento do publisher.
 
-O Docker Compose compila a API e provisiona o MongoDB 8.0 como um replica set de nó único. O healthcheck do MongoDB inicializa `rs0`, e a API aguarda até que o nó se torne primário. Dentro da rede do Compose, `MONGO_URI` é sobrescrita automaticamente para usar o serviço `mongo`:
+## Infraestrutura Docker
+
+O Docker Compose provisiona todo o ambiente: MongoDB 8.0 como replica set de nó único, RabbitMQ 4 com painel de gerenciamento (Management UI) e o container da API.
 
 ```bash
 docker compose -f docker/docker-compose.yml up --build
 ```
 
-A API é exposta na porta `8080`, o MongoDB na porta `27017`, e os dados são persistidos no volume nomeado `mongo_data`. Para encerrar os serviços preservando os dados, execute `docker compose -f docker/docker-compose.yml down`. Adicione `--volumes` somente quando quiser excluir intencionalmente o banco de dados local.
+Portas expostas:
+- **API**: `http://localhost:8080`
+- **MongoDB**: `localhost:27017`
+- **RabbitMQ AMQP**: `localhost:5672`
+- **Painel de Gerenciamento RabbitMQ**: `http://localhost:15672` (credenciais: `guest` / `guest`)
 
-## Fluxo planejado com RabbitMQ e Resend
+O estado do banco de dados e do broker de mensagens é persistido nos volumes nomeados `mongo_data` e `rabbitmq_data`. Para encerrar os serviços preservando os dados, execute `docker compose -f docker/docker-compose.yml down`. Adicione `--volumes` apenas se desejar excluir os dados locais.
 
-```text
-outbox MongoDB → relay → exchange RabbitMQ → consumer de e-mail → API Resend
-```
+## Limitações atuais e Próximos Passos
 
-Cuidados de confiabilidade que devem ser preservados durante a implementação:
-
-- Publicar com um ID de evento estável e usar publisher confirms.
-- Tornar os consumers idempotentes; a entrega deve ser tratada como at least once.
-- Reivindicar eventos atomicamente para que instâncias do relay não publiquem o mesmo trabalho simultaneamente.
-- Incrementar `attempts`, repetir com backoff e enviar mensagens esgotadas para uma dead-letter queue.
-- Marcar um evento como `published` somente após a confirmação do broker e preencher `published_at`.
-- Manter o código específico do Resend atrás de uma porta outbound.
-- Adicionar um índice para a consulta da outbox, por exemplo, sobre `status` e `created_at`.
-- Propagar `event_id`, `aggregate_id` e request ID para observabilidade.
-
-## Limitações atuais
-
-- Ainda não existe um relay de polling/CDC para a outbox.
-- RabbitMQ possui conexão, topologia e publisher configurados; o relay da outbox e o consumer de e-mail ainda não foram conectados ao fluxo.
-- Testes automatizados de integração com o MongoDB ainda não foram implementados.
-- O ambiente do Compose usa apenas um membro do replica set MongoDB e, portanto, não oferece alta disponibilidade para produção.
-- Limpeza, retenção e reivindicação concorrente de eventos da outbox ainda não foram implementadas.
-- A observabilidade está limitada aos logs HTTP e da aplicação.
+- **Limpeza e Retenção da Outbox**: A exclusão ou arquivamento automatizado de eventos antigos marcados como `delivered` ou `failed` ainda não foi implementado.
+- **Lock Distribuído / Relay Concorrente**: O worker do relay de polling considera uma única instância ativa. O suporte a concorrência entre múltiplas instâncias do relay via locks atômicos no MongoDB é uma melhoria planejada.
+- **Testes de Integração Automatizados**: Testes de integração ponta a ponta usando testcontainers para MongoDB e RabbitMQ estão planejados.
