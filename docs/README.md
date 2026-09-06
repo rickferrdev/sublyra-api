@@ -1,9 +1,8 @@
 # 📬 sublyra-api — technical documentation
 
-`sublyra-api` is a study project for reliable, asynchronous subscription workflows. It exposes an HTTP API for newsletter opt-in and opt-out, persists subscription state in MongoDB, and records the corresponding integration event using the **Transactional Outbox** pattern.
 `sublyra-api` is a study project for reliable, asynchronous subscription workflows. It exposes an HTTP API for newsletter opt-in and opt-out, persists subscription state in MongoDB, records integration events using the **Transactional Outbox** pattern, and processes email delivery asynchronously via **RabbitMQ** and **Resend**.
 
-> Current scope: the transactional write side is implemented. An outbox relay, RabbitMQ publisher/consumer, and Resend email adapter are planned but are not implemented yet.
+![sublyra-api terminal demo](assets/banner.svg)
 
 To read this documentation in Portuguese, see [`README.pt-BR.md`](README.pt-BR.md).
 

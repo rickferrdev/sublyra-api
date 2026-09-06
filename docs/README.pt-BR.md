@@ -2,6 +2,8 @@
 
 `sublyra-api` é um projeto de estudo sobre fluxos confiáveis e assíncronos de inscrição. Ele oferece uma API HTTP para inscrição e cancelamento de newsletters, persiste o estado das inscrições no MongoDB, registra eventos de integração usando o padrão **Transactional Outbox** e processa o envio assíncrono de e-mails via **RabbitMQ** e **Resend**.
 
+![sublyra-api terminal demo](assets/banner.svg)
+
 To read this documentation in English, see [`README.md`](README.md).
 
 ## Arquitetura
