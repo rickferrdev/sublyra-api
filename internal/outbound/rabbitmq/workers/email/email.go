@@ -204,15 +204,23 @@ func (worker *Worker) process(ctx context.Context, deliveries <-chan amqp.Delive
 }
 
 func (worker *Worker) MountUrl(action string, token string) string {
-	url := url.URL{
-		Scheme: "https",
-		Host:   "api.examples.com",
+	scheme := worker.env.AppScheme
+	if scheme == "" {
+		scheme = "http"
+	}
+	host := worker.env.AppHost
+	if host == "" {
+		host = "localhost:8080"
+	}
+	u := url.URL{
+		Scheme: scheme,
+		Host:   host,
 		Path:   fmt.Sprintf("/%s/confirm", action),
 	}
-	q := url.Query()
+	q := u.Query()
 	q.Set("token", token)
-	url.RawQuery = q.Encode()
-	return url.String()
+	u.RawQuery = q.Encode()
+	return u.String()
 }
 
 func (worker *Worker) SendEmail(ctx context.Context, email mailer.Email) error {

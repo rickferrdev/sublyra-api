@@ -10,6 +10,8 @@ var Provide = fx.Provide(New)
 type Env struct {
 	ServerPort         string `env:"SERVER_PORT" default:"8080"`
 	ServerHost         string `env:"SERVER_HOST" default:"localhost"`
+	AppScheme          string `env:"APP_SCHEME" default:"http"`
+	AppHost            string `env:"APP_HOST" default:"localhost:8080"`
 	MongoURI           string `env:"MONGO_URI" required:"true"`
 	ResendSecretKey    string `env:"RESEND_SECRET_KEY" required:"true"`
 	JwtSecretKey       string `env:"JWT_SECRET_KEY" required:"true"`

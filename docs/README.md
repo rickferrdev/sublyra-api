@@ -193,9 +193,9 @@ The application automatically declares its messaging topology on startup:
 | --- | --- | --- | --- |
 | `SERVER_HOST` | no | `localhost` | HTTP bind address |
 | `SERVER_PORT` | no | `8080` | HTTP port |
+| `APP_SCHEME` | no | `http` | URL scheme used for constructing confirmation/cancellation link URLs |
+| `APP_HOST` | no | `localhost:8080` | Application host domain/address used for constructing link URLs |
 | `MONGO_URI` | yes | — | MongoDB replica-set connection URI |
-| `JWT_SECRET_KEY` | yes | — | Signs confirmation/cancellation JWTs |
-| `RESEND_SECRET_KEY` | currently yes | — | Reserved for the planned Resend adapter |
 | `JWT_SECRET_KEY` | yes | — | Secret key for signing confirmation/cancellation JWTs |
 | `RABBITMQ_URI` | yes | — | RabbitMQ AMQP connection URI |
 | `RESEND_SECRET_KEY` | yes | — | Resend API key for sending email notifications |

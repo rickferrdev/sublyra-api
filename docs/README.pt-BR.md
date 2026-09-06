@@ -168,6 +168,8 @@ A aplicação declara automaticamente a topologia de mensageria durante a inicia
 | --- | --- | --- | --- |
 | `SERVER_HOST` | não | `localhost` | Endereço de bind HTTP |
 | `SERVER_PORT` | não | `8080` | Porta HTTP |
+| `APP_SCHEME` | não | `http` | Esquema/Protocolo (http/https) utilizado para montar URLs de confirmação/cancelamento |
+| `APP_HOST` | não | `localhost:8080` | Host/Domínio da aplicação utilizado para montar URLs de confirmação/cancelamento |
 | `MONGO_URI` | sim | — | URI de conexão com o replica set MongoDB |
 | `JWT_SECRET_KEY` | sim | — | Chave secreta para assinar os JWTs de confirmação e cancelamento |
 | `RABBITMQ_URI` | sim | — | URI de conexão AMQP com o RabbitMQ |
