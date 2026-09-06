@@ -6,7 +6,8 @@ import (
 	"errors"
 
 	amqp "github.com/rabbitmq/amqp091-go"
-	"github.com/rickferrdev/sublyra-api/internal/outbound/rabbitmq"
+	"github.com/rickferrdev/sublyra-api/internal/core/ports"
+	"github.com/rickferrdev/sublyra-api/internal/infra/rabbitmq"
 	"github.com/rickferrdev/sublyra-api/internal/outbound/rabbitmq/topology"
 	"go.uber.org/fx"
 )
@@ -41,7 +42,7 @@ type Message struct {
 
 func (publisher *Publisher) Publish(ctx context.Context, message Message) error {
 	if !json.Valid(message.Payload) {
-		return rabbitmq.RabbitMQPublishError(errors.New("json invalid"))
+		return ports.Internal(errors.New("json invalid"))
 	}
 	if err := publisher.Client.Channel.PublishWithContext(
 		ctx,
@@ -53,7 +54,7 @@ func (publisher *Publisher) Publish(ctx context.Context, message Message) error 
 			DeliveryMode: amqp.Persistent,
 		},
 	); err != nil {
-		return rabbitmq.RabbitMQPublishError(err)
+		return ports.Internal(err)
 	}
 	return nil
 }

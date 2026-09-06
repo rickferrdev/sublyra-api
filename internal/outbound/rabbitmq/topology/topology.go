@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	amqp "github.com/rabbitmq/amqp091-go"
-	"github.com/rickferrdev/sublyra-api/internal/outbound/rabbitmq"
+	"github.com/rickferrdev/sublyra-api/internal/infra/rabbitmq"
 	"go.uber.org/fx"
 )
 

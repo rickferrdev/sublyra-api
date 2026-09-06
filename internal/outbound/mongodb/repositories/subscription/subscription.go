@@ -35,10 +35,12 @@ type Interface interface {
 	RenewConfirmationWithOutbox(ctx context.Context, event domain.OutboxSubscriptionEvent, email, confirmation string) error
 	RenewUnsubscribedWithOutbox(ctx context.Context, event domain.OutboxSubscriptionEvent, email, confirmation string) error
 
-	FindPendingOutbox(ctx context.Context, limit int) ([]domain.OutboxSubscription, error)
+	BatchFindOutboxByStatus(ctx context.Context, status domain.OutboxSubscriptionStatus, limit int) ([]domain.OutboxSubscription, error)
 	MarkPublished(ctx context.Context, id string, publishedAt time.Time) error
 	MarkFailed(ctx context.Context, id string, reason string) error
-	IncrementAttempts(ctx context.Context, id string) error
+	MarkProcessing(ctx context.Context, id string) error
+	MarkDelivered(ctx context.Context, id string) error
+	IncrementAttempts(ctx context.Context, id string, reason string) error
 }
 
 type FxParams struct {
@@ -353,13 +355,13 @@ func (database *Database) InsertWithOutbox(ctx context.Context, event domain.Out
 	return err
 }
 
-// FindPendingOutbox retrieves pending outbox events ordered from oldest to
+// FindOutboxByStatus retrieves pending outbox events ordered from oldest to
 // newest. A result with no events is returned nil and nil, not an error.
 //
 // It may return:
 //   - ports.CodeInternal when MongoDB cannot execute or decode the query;
 //   - ObjectIDInvalid when a stored outbox ID or AggregateID is empty.
-func (database *Database) FindPendingOutbox(ctx context.Context, limit int) ([]domain.OutboxSubscription, error) {
+func (database *Database) BatchFindOutboxByStatus(ctx context.Context, status domain.OutboxSubscriptionStatus, limit int) ([]domain.OutboxSubscription, error) {
 	if limit <= 0 {
 		limit = 100
 	}
@@ -367,7 +369,7 @@ func (database *Database) FindPendingOutbox(ctx context.Context, limit int) ([]d
 		{Key: "created_at", Value: 1},
 	})
 	filter := bson.M{
-		"status": domain.OutboxSubscriptionStatusPending,
+		"status": status,
 	}
 	cursor, err := database.outbox.Find(ctx, filter, opts)
 	if err != nil {
@@ -405,8 +407,7 @@ func (database *Database) MarkPublished(ctx context.Context, id string, publishe
 		return ObjectIDInvalidError(err)
 	}
 	filter := bson.M{
-		"_id":    objectID,
-		"status": domain.OutboxSubscriptionStatusPending,
+		"_id": objectID,
 	}
 	document := bson.M{
 		"$set": bson.M{
@@ -428,14 +429,15 @@ func (database *Database) MarkPublished(ctx context.Context, id string, publishe
 	return nil
 }
 
-func (database *Database) IncrementAttempts(ctx context.Context, id string) error {
+func (database *Database) IncrementAttempts(ctx context.Context, id string, reason string) error {
 	objectID, err := bson.ObjectIDFromHex(id)
 	if err != nil {
 		return ObjectIDInvalidError(err)
 	}
 	filter := bson.M{
-		"_id":    objectID,
-		"status": domain.OutboxSubscriptionStatusPending,
+		"_id":        objectID,
+		"status":     domain.OutboxSubscriptionStatusProcessing,
+		"last_error": reason,
 	}
 	document := bson.M{
 		"$inc": bson.M{
@@ -461,14 +463,67 @@ func (database *Database) MarkFailed(ctx context.Context, id string, reason stri
 		return ObjectIDInvalidError(err)
 	}
 	filter := bson.M{
-		"_id":    objectID,
-		"status": domain.OutboxSubscriptionStatusPending,
+		"_id": objectID,
 	}
 	document := bson.M{
 		"$set": bson.M{
 			"status":     domain.OutboxSubscriptionStatusFailed,
 			"updated_at": time.Now(),
 			"last_error": reason,
+		},
+	}
+	res, err := database.outbox.UpdateOne(ctx, filter, document)
+	if err != nil {
+		return InternalError(err)
+	}
+	if !res.Acknowledged {
+		return NotAcknowledgedError(nil)
+	}
+	if res.MatchedCount == 0 {
+		return NotFoundError(nil)
+	}
+	return nil
+}
+
+func (database *Database) MarkProcessing(ctx context.Context, id string) error {
+	objectID, err := bson.ObjectIDFromHex(id)
+	if err != nil {
+		return ObjectIDInvalidError(err)
+	}
+	filter := bson.M{
+		"_id": objectID,
+	}
+	document := bson.M{
+		"$set": bson.M{
+			"status":     domain.OutboxSubscriptionStatusProcessing,
+			"updated_at": time.Now(),
+		},
+	}
+	res, err := database.outbox.UpdateOne(ctx, filter, document)
+	if err != nil {
+		return InternalError(err)
+	}
+	if !res.Acknowledged {
+		return NotAcknowledgedError(nil)
+	}
+	if res.MatchedCount == 0 {
+		return NotFoundError(nil)
+	}
+	return nil
+}
+
+func (database *Database) MarkDelivered(ctx context.Context, id string) error {
+	objectID, err := bson.ObjectIDFromHex(id)
+	if err != nil {
+		return ObjectIDInvalidError(err)
+	}
+	filter := bson.M{
+		"_id": objectID,
+	}
+	document := bson.M{
+		"$set": bson.M{
+			"status":     domain.OutboxSubscriptionStatusDelivered,
+			"updated_at": time.Now(),
 		},
 	}
 	res, err := database.outbox.UpdateOne(ctx, filter, document)

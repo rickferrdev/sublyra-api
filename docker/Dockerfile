@@ -7,9 +7,11 @@ RUN go mod download
 
 COPY . .
 
-RUN go build -o /app/bin/api ./cmd/api
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o /app/bin/api ./cmd/api
 
 FROM alpine:latest
+
+RUN apk --no-cache add ca-certificates tzdata
 
 WORKDIR /app
 

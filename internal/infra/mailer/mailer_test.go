@@ -1,31 +1,110 @@
-package mailer
+package mailer_test
 
 import (
+	"context"
+	"errors"
 	"strings"
 	"testing"
+
+	"github.com/rickferrdev/sublyra-api/internal/config/env"
+	"github.com/rickferrdev/sublyra-api/internal/infra/mailer"
 )
 
-func TestEmailTemplatesRenderRecipientAndActionURL(t *testing.T) {
-	mailer := &Mailer{}
-	tests := []struct {
-		name  string
-		email Email
-		want  []string
-	}{
-		{"confirmation", mailer.EmailConfirmation(ConfirmationData{Email: "person@example.com", ConfirmationURL: "https://example.com/confirm?token=test"}), []string{"person@example.com", "https://example.com/confirm?token=test", "CONFIRM SUBSCRIPTION"}},
-		{"cancellation", mailer.EmailCancellation(CancellationData{Email: "person@example.com", CancellationURL: "https://example.com/cancel?token=test"}), []string{"person@example.com", "https://example.com/cancel?token=test", "CONFIRM UNSUBSCRIPTION"}},
+func TestMailer_EmailConfirmation(t *testing.T) {
+	m := mailer.New(mailer.FxParams{
+		Env: &env.Env{
+			ResendSecretKey: "re_test_123",
+			ResendFromEmail: "onboarding@resend.dev",
+		},
+	})
+
+	emailFn := m.EmailConfirmation(mailer.ConfirmationData{
+		Recipients:      []string{"user@example.com"},
+		Subject:         "Confirm your subscription",
+		ConfirmationURL: "https://api.examples.com/subscription/confirm?token=abc",
+		Email:           "user@example.com",
+	})
+
+	req, err := emailFn()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			content, err := test.email()
-			if err != nil {
-				t.Fatalf("render template: %v", err)
-			}
-			for _, expected := range test.want {
-				if !strings.Contains(content, expected) {
-					t.Fatalf("rendered email does not contain %q", expected)
-				}
-			}
+
+	if req.Subject != "Confirm your subscription" {
+		t.Errorf("expected subject 'Confirm your subscription', got %q", req.Subject)
+	}
+	if len(req.Recipients) != 1 || req.Recipients[0] != "user@example.com" {
+		t.Errorf("expected recipient 'user@example.com', got %v", req.Recipients)
+	}
+	if !strings.Contains(req.BytesHTML, "https://api.examples.com/subscription/confirm?token=abc") {
+		t.Errorf("expected HTML to contain confirmation URL, got: %s", req.BytesHTML)
+	}
+}
+
+func TestMailer_EmailCancellation(t *testing.T) {
+	m := mailer.New(mailer.FxParams{
+		Env: &env.Env{
+			ResendSecretKey: "re_test_123",
+			ResendFromEmail: "onboarding@resend.dev",
+		},
+	})
+
+	emailFn := m.EmailCancellation(mailer.CancellationData{
+		Recipients:      []string{"user@example.com"},
+		Subject:         "Cancel your subscription",
+		CancellationURL: "https://api.examples.com/unsubscription/confirm?token=xyz",
+		Email:           "user@example.com",
+	})
+
+	req, err := emailFn()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if req.Subject != "Cancel your subscription" {
+		t.Errorf("expected subject 'Cancel your subscription', got %q", req.Subject)
+	}
+	if !strings.Contains(req.BytesHTML, "https://api.examples.com/unsubscription/confirm?token=xyz") {
+		t.Errorf("expected HTML to contain cancellation URL, got: %s", req.BytesHTML)
+	}
+}
+
+func TestMailer_ValidationErrors(t *testing.T) {
+	m := mailer.New(mailer.FxParams{
+		Env: &env.Env{
+			ResendSecretKey: "re_test_123",
+		},
+	})
+
+	t.Run("missing subject", func(t *testing.T) {
+		emailFn := m.EmailConfirmation(mailer.ConfirmationData{
+			Recipients: []string{"user@example.com"},
+			Subject:    "",
 		})
-	}
+		_, err := emailFn()
+		if err == nil {
+			t.Error("expected error for missing subject, got nil")
+		}
+	})
+
+	t.Run("missing recipients", func(t *testing.T) {
+		emailFn := m.EmailConfirmation(mailer.ConfirmationData{
+			Recipients: []string{},
+			Subject:    "Test",
+		})
+		_, err := emailFn()
+		if err == nil {
+			t.Error("expected error for missing recipients, got nil")
+		}
+	})
+
+	t.Run("send with invalid function payload", func(t *testing.T) {
+		ctx := context.Background()
+		err := m.Send(ctx, func() (*mailer.EmailRequest, error) {
+			return nil, errors.New("simulated error")
+		})
+		if err == nil {
+			t.Error("expected error from Send when function fails, got nil")
+		}
+	})
 }

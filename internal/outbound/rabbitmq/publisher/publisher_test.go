@@ -10,7 +10,7 @@ import (
 func TestPublishRejectsInvalidJSONBeforeUsingChannel(t *testing.T) {
 	publisher := &Publisher{}
 	err := publisher.Publish(context.Background(), Message{Payload: []byte("not-json")})
-	if !ports.IsCode(err, "RABBITMQ_PUBLISH_ERROR") {
+	if !ports.IsCode(err, ports.CodeInternal) {
 		t.Fatalf("expected publish error for invalid JSON, got %v", err)
 	}
 }
