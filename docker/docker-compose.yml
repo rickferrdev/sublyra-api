@@ -41,6 +41,7 @@ services:
     environment:
       SERVER_HOST: 0.0.0.0
       MONGO_URI: mongodb://mongo:27017/?replicaSet=rs0
+      RABBITMQ_URI: amqp://guest:guest@rabbitmq:5672/
 
 volumes:
   mongo_data:
