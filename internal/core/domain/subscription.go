@@ -18,9 +18,11 @@ const (
 	EventOutboxSubscriptionConfirmationRequested OutboxSubscriptionEvent = "outbox_subscription_confirmation_requested"
 	EventOutboxSubscriptionCancellationRequested OutboxSubscriptionEvent = "outbox_subscription_cancellation_requested"
 
-	OutboxSubscriptionStatusPending   OutboxSubscriptionStatus = "pending"
-	OutboxSubscriptionStatusPublished OutboxSubscriptionStatus = "published"
-	OutboxSubscriptionStatusFailed    OutboxSubscriptionStatus = "failed"
+	OutboxSubscriptionStatusPending    OutboxSubscriptionStatus = "pending"
+	OutboxSubscriptionStatusProcessing OutboxSubscriptionStatus = "processing"
+	OutboxSubscriptionStatusPublished  OutboxSubscriptionStatus = "published"
+	OutboxSubscriptionStatusDelivered  OutboxSubscriptionStatus = "delivered"
+	OutboxSubscriptionStatusFailed     OutboxSubscriptionStatus = "failed"
 
 	SubscriptionStatusPending      SubscriptionStatus = "pending"
 	SubscriptionStatusSubscribed   SubscriptionStatus = "subscribed"
@@ -56,6 +58,14 @@ type OutboxSubscription struct {
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 	LastError string    `json:"last_error"`
+}
+
+type IntegrationEvent struct {
+	EventID     string                  `json:"event_id"`
+	EventType   OutboxSubscriptionEvent `json:"event_type"`
+	AggregateID string                  `json:"aggregate_id"`
+	OccurredAt  time.Time               `json:"occurred_at"`
+	Payload     map[string]any          `json:"payload"`
 }
 
 func (subscription *Subscription) IsSubscribed() bool {

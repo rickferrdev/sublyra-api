@@ -15,8 +15,8 @@ type Env struct {
 	JwtSecretKey       string `env:"JWT_SECRET_KEY" required:"true"`
 	RabbitMQURI        string `env:"RABBITMQ_URI" required:"true"`
 	OutboxPollInterval string `env:"OUTBOX_POLL_INTERVAL" default:"2s"`
-	OutboxBatchSize    int    `env:"OUTBOX_BATCH_SIZE" default:"50"`
-	OutboxMaxAttempts  int    `env:"OUTBOX_MAX_ATTEMPTS" default:"5"`
+	OutboxBatchSize    string `env:"OUTBOX_BATCH_SIZE" default:"50"`
+	OutboxMaxAttempts  string `env:"OUTBOX_MAX_ATTEMPTS" default:"5"`
 	ResendFromEmail    string `env:"RESEND_FROM_EMAIL" default:"onboarding@resend.dev"`
 	RabbitMQPrefetch   string `env:"RABBITMQ_PREFETCH" default:"5"`
 }

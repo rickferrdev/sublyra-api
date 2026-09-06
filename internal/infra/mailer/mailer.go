@@ -21,7 +21,7 @@ type Mailer struct {
 }
 
 type Interface interface {
-	Send(ctx context.Context, subject string, recipient []string, email Email) error
+	Send(ctx context.Context, email Email) error
 	EmailConfirmation(data ConfirmationData) Email
 	EmailCancellation(data CancellationData) Email
 }
@@ -42,12 +42,31 @@ func New(params FxParams) *Mailer {
 
 type (
 	CancellationData struct {
+		Recipients      []string
+		Subject         string
 		CancellationURL string
 		Email           string
 	}
 	ConfirmationData struct {
+		Recipients      []string
+		Subject         string
 		ConfirmationURL string
 		Email           string
+	}
+)
+
+type (
+	EmailRequest struct {
+		Recipients []string
+		Subject    string
+		BytesHTML  string
+	}
+
+	RenderRequest struct {
+		Recipients   []string
+		Subject      string
+		TemplateName string
+		Template     any
 	}
 )
 
@@ -58,43 +77,57 @@ var templates = template.Must(
 )
 
 type (
-	Email func() (string, error)
+	Email func() (*EmailRequest, error)
 )
 
-func (mailer *Mailer) Send(ctx context.Context, subject string, recipients []string, email Email) error {
-	if subject == "" {
-		return ports.Internal(errors.New("invalid subject"))
-	}
-
-	if len(recipients) == 0 {
-		return ports.Internal(errors.New("invalid recipients"))
-	}
-
-	bytes, err := email()
+func (mailer *Mailer) Send(ctx context.Context, email Email) error {
+	data, err := email()
 	if err != nil {
 		return ports.Internal(err)
 	}
 	_, err = mailer.client.Emails.SendWithContext(ctx, &resend.SendEmailRequest{
-		From: mailer.env.ResendFromEmail,
-		To:      recipients,
-		Subject: subject,
-		Html:    bytes,
+		From:    mailer.env.ResendFromEmail,
+		To:      data.Recipients,
+		Subject: data.Subject,
+		Html:    data.BytesHTML,
 	})
 	return err
 }
 
 func (mailer *Mailer) EmailConfirmation(data ConfirmationData) Email {
-	return mailer.render("confirmation.html", data)
+	return mailer.render(RenderRequest{
+		TemplateName: "confirmation.html",
+		Recipients:   data.Recipients,
+		Template:     data,
+		Subject:      data.Subject,
+	})
 }
 
 func (mailer *Mailer) EmailCancellation(data CancellationData) Email {
-	return mailer.render("cancellation.html", data)
+	return mailer.render(RenderRequest{
+		TemplateName: "cancellation.html",
+		Recipients:   data.Recipients,
+		Template:     data,
+		Subject:      data.Subject,
+	})
 }
 
-func (mailer *Mailer) render(name string, data any) Email {
-	return func() (string, error) {
+func (mailer *Mailer) render(data RenderRequest) Email {
+	return func() (*EmailRequest, error) {
+		if data.Subject == "" {
+			return nil, ports.Internal(errors.New("invalid subject"))
+		}
+		if len(data.Recipients) == 0 {
+			return nil, ports.Internal(errors.New("invalid recipients"))
+		}
 		var bytes bytes.Buffer
-		err := templates.ExecuteTemplate(&bytes, name, data)
-		return bytes.String(), err
+		if err := templates.ExecuteTemplate(&bytes, data.TemplateName, data.Template); err != nil {
+			return nil, err
+		}
+		return &EmailRequest{
+			Recipients: data.Recipients,
+			Subject:    data.Subject,
+			BytesHTML:  bytes.String(),
+		}, nil
 	}
 }

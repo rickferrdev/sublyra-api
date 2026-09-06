@@ -1,6 +1,6 @@
 module github.com/rickferrdev/sublyra-api
 
-go 1.26.3
+go 1.26.5
 
 require (
 	github.com/go-playground/validator/v10 v10.30.3
@@ -26,6 +26,7 @@ require (
 	github.com/mattn/go-isatty v0.0.22 // indirect
 	github.com/philhofer/fwd v1.2.0 // indirect
 	github.com/rabbitmq/amqp091-go v1.14.0 // indirect
+	github.com/rickferrdev/bea-go v1.0.1 // indirect
 	github.com/tinylib/msgp v1.6.4 // indirect
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
 	github.com/valyala/fasthttp v1.71.0 // indirect
