@@ -12,9 +12,19 @@ type (
 
 	OutboxSubscriptionEvent  string
 	OutboxSubscriptionStatus string
+	SubscriptionName         string
+	SubscriptionPrice        int
 )
 
 const (
+	SubscriptionNamePro      SubscriptionName = "Pro"
+	SubscriptionNameBasic    SubscriptionName = "Basic"
+	SubscriptionNameBusiness SubscriptionName = "Business"
+
+	SubscriptionPriceBasic    SubscriptionPrice = 0
+	SubscriptionPricePro      SubscriptionPrice = 2000
+	SubscriptionPriceBusiness SubscriptionPrice = 99000
+
 	EventOutboxSubscriptionConfirmationRequested OutboxSubscriptionEvent = "outbox_subscription_confirmation_requested"
 	EventOutboxSubscriptionCancellationRequested OutboxSubscriptionEvent = "outbox_subscription_cancellation_requested"
 
@@ -30,12 +40,17 @@ const (
 )
 
 type Subscription struct {
-	ID     string             `json:"id"`
+	ID string `json:"id"`
+
+	Name  SubscriptionName  `json:"name"`
+	Price SubscriptionPrice `json:"price"`
+
 	Email  string             `json:"email"`
 	Status SubscriptionStatus `json:"status"`
 
 	SubscribedAt   time.Time `json:"subscribed_at"`
 	UnsubscribedAt time.Time `json:"unsubscribed_at"`
+	ExpiresAt      time.Time `json:"expires_at"`
 
 	ConfirmationToken string `json:"confirmation_token"`
 	UnsubscribeToken  string `json:"unsubscribe_token"`
@@ -97,6 +112,10 @@ func (subscription *Subscription) CompareTokenConfirmation(token string) bool {
 
 func (subscription *Subscription) CompareTokenUnsubscribe(token string) bool {
 	return subscription.UnsubscribeToken == token
+}
+
+func (subscription *Subscription) IsExpired() bool {
+	return time.Now().After(subscription.ExpiresAt)
 }
 
 func (outbox *OutboxSubscription) IsPending() bool {

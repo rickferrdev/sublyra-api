@@ -8,6 +8,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/rickferrdev/sublyra-api/internal/core/domain"
 	"github.com/rickferrdev/sublyra-api/internal/core/ports"
+	"github.com/rickferrdev/sublyra-api/internal/inbound/http/rest/constants"
 	dbsubscription "github.com/rickferrdev/sublyra-api/internal/outbound/mongodb/repositories/subscription"
 	"github.com/rickferrdev/sublyra-api/internal/platform/jwttoken"
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -21,11 +22,11 @@ type Service struct {
 	database dbsubscription.Interface
 }
 type Interface interface {
-	RegisterSubscription(ctx context.Context, email string) error
+	RegisterSubscription(ctx context.Context, email, name string) error
 	RegisterUnsubscription(ctx context.Context, email string) error
 
-	SubscriptionConfirm(ctx context.Context, token string) error
-	UnsubscriptionConfirm(ctx context.Context, token string) error
+	SubscriptionConfirm(ctx context.Context) error
+	UnsubscriptionConfirm(ctx context.Context) error
 }
 
 type FxParams struct {
@@ -43,11 +44,11 @@ func New(params FxParams) *Service {
 	return &service
 }
 
-func (service *Service) RegisterSubscription(ctx context.Context, email string) error {
+func (service *Service) RegisterSubscription(ctx context.Context, email, name string) error {
 	subscription, err := service.database.Find(ctx, email)
 	if err != nil {
 		if subscription == nil && ports.IsCode(err, dbsubscription.CodeNotFound) {
-			return service.CreateSubscription(ctx, email)
+			return service.CreateSubscription(ctx, email, name)
 		}
 		return ports.Internal(err)
 	}
@@ -74,12 +75,16 @@ func (service *Service) RegisterUnsubscription(ctx context.Context, email string
 	return service.RenewUnsubscribed(ctx, email)
 }
 
-func (service *Service) SubscriptionConfirm(ctx context.Context, token string) error {
-	claims, err := service.jwttoken.ValidateToken(token)
-	if err != nil {
-		return ports.Unauthorized(err)
+func (service *Service) SubscriptionConfirm(ctx context.Context) error {
+	auth, ok := ctx.Value(constants.SUBSCRIPTION_AUTH_KEY).(constants.SubscriptionAuth)
+	if !ok {
+		return ports.Unauthorized(errors.New("expected auth token"))
 	}
-	email := claims.Data
+	email := auth.Claims.Data
+	token := auth.Token
+	if !ok {
+		return ports.Unauthorized(errors.New("expected valid token"))
+	}
 	subscription, err := service.database.Find(ctx, email)
 	if err != nil {
 		if ports.IsCode(err, dbsubscription.CodeNotFound) {
@@ -96,11 +101,20 @@ func (service *Service) SubscriptionConfirm(ctx context.Context, token string) e
 	if !subscription.IsPending() && !subscription.IsUnsubscribed() {
 		return ports.Unauthorized(errors.New("invalid subscription status"))
 	}
+	var expiresAt time.Time
+	switch subscription.Name {
+	case domain.SubscriptionNameBasic:
+	case domain.SubscriptionNamePro, domain.SubscriptionNameBusiness:
+		expiresAt = time.Now().AddDate(0, 1, 0)
+	default:
+		return ports.Internal(errors.New("subscription name is corrupt"))
+	}
 	status := domain.SubscriptionStatusSubscribed
 	subscribedAt, updatedAt := time.Now(), time.Now()
 	if err := service.database.Update(ctx, email, dbsubscription.SubscriptionUpdateSchema{
 		Status:       &status,
 		SubscribedAt: &subscribedAt,
+		ExpiresAt:    &expiresAt,
 		UpdatedAt:    &updatedAt,
 		Unset:        []string{"unsubscribed_at", "confirmation_token"},
 	}); err != nil {
@@ -112,12 +126,13 @@ func (service *Service) SubscriptionConfirm(ctx context.Context, token string) e
 	return nil
 }
 
-func (service *Service) UnsubscriptionConfirm(ctx context.Context, token string) error {
-	claims, err := service.jwttoken.ValidateToken(token)
-	if err != nil {
-		return ports.Unauthorized(err)
+func (service *Service) UnsubscriptionConfirm(ctx context.Context) error {
+	auth, ok := ctx.Value(constants.SUBSCRIPTION_AUTH_KEY).(constants.SubscriptionAuth)
+	if !ok {
+		return ports.Unauthorized(errors.New("expected auth token"))
 	}
-	email := claims.Data
+	email := auth.Claims.Data
+	token := auth.Token
 	subscription, err := service.database.Find(ctx, email)
 	if err != nil {
 		if ports.IsCode(err, dbsubscription.CodeNotFound) {
@@ -167,19 +182,37 @@ func (service *Service) GenerateToken(email string, subject string) (string, err
 	return token, nil
 }
 
-func (service *Service) CreateSubscription(ctx context.Context, email string) error {
+func (service *Service) CreateSubscription(ctx context.Context, email, name string) error {
 	token, err := service.GenerateToken(email, string(domain.SubscriptionStatusSubscribed))
 	if err != nil {
 		return err
 	}
+	var (
+		subscriptionName  domain.SubscriptionName
+		subscriptionPrice domain.SubscriptionPrice
+	)
+	switch name {
+	case string(domain.SubscriptionNameBasic):
+		subscriptionName = domain.SubscriptionNameBasic
+		subscriptionPrice = domain.SubscriptionPriceBasic
+	case string(domain.SubscriptionNamePro):
+		subscriptionName = domain.SubscriptionNamePro
+		subscriptionPrice = domain.SubscriptionPricePro
+	case string(domain.SubscriptionNameBusiness):
+		subscriptionName = domain.SubscriptionNameBusiness
+		subscriptionPrice = domain.SubscriptionPriceBusiness
+	}
 	subscription := domain.Subscription{
 		ID:                bson.NewObjectID().Hex(),
+		Name:              subscriptionName,
+		Price:             subscriptionPrice,
 		Email:             email,
 		Status:            domain.SubscriptionStatusPending,
 		ConfirmationToken: token,
 		CreatedAt:         time.Now(),
 		UpdatedAt:         time.Now(),
 	}
+	// isso com o price, expires at e name...
 	if err := service.database.InsertWithOutbox(
 		ctx,
 		domain.EventOutboxSubscriptionConfirmationRequested,
