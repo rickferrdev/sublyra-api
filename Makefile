@@ -4,6 +4,9 @@ run:
 test:
 	go test ./...
 
+test-integration:
+	go test -v -tags=integration ./...
+
 tidy:
 	go mod tidy
 
@@ -15,3 +18,9 @@ lint:
 
 build:
 	go build -o bin/api ./cmd/api
+
+docker-up:
+	docker-compose -f docker/docker-compose.yml up -d
+
+docker-down:
+	docker-compose -f docker/docker-compose.yml down

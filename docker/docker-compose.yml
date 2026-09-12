@@ -11,15 +11,44 @@ services:
       interval: 5s
       timeout: 5s
       retries: 20
-  mongo:
+
+  mongo1:
     image: mongo:8.0
     command: [ "mongod", "--replSet", "rs0", "--bind_ip_all" ]
     ports:
       - "27017:27017"
     volumes:
-      - mongo_data:/data/db
+      - mongo1_data:/data/db
     healthcheck:
-      test: [ "CMD", "mongosh", "--quiet", "--eval", "try { if (rs.status().myState !== 1) quit(1) } catch (error) { rs.initiate({_id: 'rs0', members: [{_id: 0, host: 'mongo:27017'}]}); quit(1) }" ]
+      test: [ "CMD", "mongosh", "--quiet", "--eval", "try { const s = rs.status(); if (s.ok === 1 && s.members.some(m => m.state === 1)) quit(0); quit(1); } catch (e) { rs.initiate({_id: 'rs0', members: [{_id: 0, host: 'mongo1:27017'}, {_id: 1, host: 'mongo2:27017'}, {_id: 2, host: 'mongo3:27017'}]}); quit(1); }" ]
+      interval: 5s
+      timeout: 5s
+      retries: 25
+      start_period: 5s
+
+  mongo2:
+    image: mongo:8.0
+    command: [ "mongod", "--replSet", "rs0", "--bind_ip_all" ]
+    ports:
+      - "27018:27017"
+    volumes:
+      - mongo2_data:/data/db
+    healthcheck:
+      test: [ "CMD", "mongosh", "--quiet", "--eval", "try { if (db.adminCommand('ping').ok === 1) quit(0); quit(1); } catch (e) { quit(1); }" ]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 5s
+
+  mongo3:
+    image: mongo:8.0
+    command: [ "mongod", "--replSet", "rs0", "--bind_ip_all" ]
+    ports:
+      - "27019:27017"
+    volumes:
+      - mongo3_data:/data/db
+    healthcheck:
+      test: [ "CMD", "mongosh", "--quiet", "--eval", "try { if (db.adminCommand('ping').ok === 1) quit(0); quit(1); } catch (e) { quit(1); }" ]
       interval: 5s
       timeout: 5s
       retries: 20
@@ -30,7 +59,11 @@ services:
       context: ..
       dockerfile: docker/Dockerfile
     depends_on:
-      mongo:
+      mongo1:
+        condition: service_healthy
+      mongo2:
+        condition: service_healthy
+      mongo3:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
@@ -40,9 +73,11 @@ services:
       - ../.env
     environment:
       SERVER_HOST: 0.0.0.0
-      MONGO_URI: mongodb://mongo:27017/?replicaSet=rs0
+      MONGO_URI: mongodb://mongo1:27017,mongo2:27017,mongo3:27017/?replicaSet=rs0
       RABBITMQ_URI: amqp://guest:guest@rabbitmq:5672/
 
 volumes:
-  mongo_data:
+  mongo1_data:
+  mongo2_data:
+  mongo3_data:
   rabbitmq_data:
