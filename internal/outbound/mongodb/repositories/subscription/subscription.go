@@ -41,6 +41,7 @@ type Interface interface {
 	MarkProcessing(ctx context.Context, id string) error
 	MarkDelivered(ctx context.Context, id string) error
 	IncrementAttempts(ctx context.Context, id string, reason string) error
+	ClaimPendingOutbox(ctx context.Context, maxAttempts int) (*domain.OutboxSubscription, error)
 }
 
 type FxParams struct {
@@ -537,4 +538,28 @@ func (database *Database) MarkDelivered(ctx context.Context, id string) error {
 		return NotFoundError(nil)
 	}
 	return nil
+}
+
+func (database *Database) ClaimPendingOutbox(ctx context.Context, maxAttempts int) (*domain.OutboxSubscription, error) {
+	var outbox OutboxSubscriptionSchema
+	filter := bson.M{
+		"status": domain.OutboxSubscriptionStatusPending,
+		"attempts": bson.M{
+			"$lt": maxAttempts,
+		},
+	}
+	update := bson.M{
+		"$set": bson.M{
+			"status":     domain.OutboxSubscriptionStatusProcessing,
+			"updated_at": time.Now(),
+		},
+	}
+	opts := options.FindOneAndUpdate().SetReturnDocument(options.After)
+	if err := database.outbox.FindOneAndUpdate(ctx, filter, update, opts).Decode(&outbox); err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return nil, nil
+		}
+		return nil, InternalError(err)
+	}
+	return outbox.ToDomain()
 }
