@@ -74,8 +74,11 @@ Transações do MongoDB envolvendo múltiplos documentos exigem um replica set o
 ```json
 {
   "_id": "ObjectId",
+  "name": "Basic | Pro | Business",
+  "price": "inteiro",
   "email": "person@example.com",
   "status": "pending | subscribed | unsubscribed",
+  "expires_at": "datetime opcional",
   "confirmation_token": "JWT opcional",
   "unsubscribe_token": "JWT opcional",
   "subscribed_at": "datetime opcional",

@@ -92,8 +92,11 @@ MongoDB multi-document transactions require a replica set or a sharded cluster. 
 ```json
 {
   "_id": "ObjectId",
+  "name": "Basic | Pro | Business",
+  "price": "integer",
   "email": "person@example.com",
   "status": "pending | subscribed | unsubscribed",
+  "expires_at": "optional datetime",
   "confirmation_token": "optional JWT",
   "unsubscribe_token": "optional JWT",
   "subscribed_at": "optional datetime",
