@@ -7,9 +7,12 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v3"
+	"github.com/gofiber/fiber/v3/middleware/cors"
+
 	"github.com/gofiber/fiber/v3/middleware/limiter"
 	"github.com/gofiber/fiber/v3/middleware/recover"
 	"github.com/gofiber/fiber/v3/middleware/requestid"
+	"github.com/gofiber/fiber/v3/middleware/static"
 	bea "github.com/rickferrdev/bea-go"
 	"github.com/rickferrdev/sublyra-api/internal/config/env"
 	"github.com/rickferrdev/sublyra-api/internal/core/ports"
@@ -38,6 +41,10 @@ func New(params Params) (*fiber.App, fiber.Router, error) {
 	})
 
 	registerMiddlewares(app, params.Env, params.Log)
+	app.Use("/", static.New("./web/dist"))
+	app.Get("/favicon.svg", func(c fiber.Ctx) error {
+		return c.SendStatus(fiber.StatusNoContent)
+	})
 
 	return app, app.Group("/api/v1"), nil
 }
@@ -46,12 +53,12 @@ func registerMiddlewares(app *fiber.App, env *env.Env, logger *bea.Logger) {
 	app.Use(recover.New(recover.ConfigDefault))
 	app.Use(requestid.New())
 	app.Use(ResponseLogger(logger))
-	// app.Use(cors.New(cors.Config{
-	// 	AllowOrigins: []string{env.CorsAllowedOrigins},
-	// 	AllowMethods: []string{fiber.MethodGet, fiber.MethodPost},
-	// 	AllowHeaders: []string{fiber.HeaderOrigin, fiber.HeaderContentType, fiber.HeaderAccept},
-	// }))
-	app.Use(limiter.New(limiter.Config{
+	app.Use(cors.New(cors.Config{
+		AllowOrigins: []string{env.CorsFrontendAllowed},
+		AllowMethods: []string{fiber.MethodGet, fiber.MethodPost},
+		AllowHeaders: []string{fiber.HeaderOrigin, fiber.HeaderContentType, fiber.HeaderAccept},
+	}))
+	app.Use("/api", limiter.New(limiter.Config{
 		Expiration:             30 * time.Second,
 		SkipSuccessfulRequests: false,
 		Max:                    3,

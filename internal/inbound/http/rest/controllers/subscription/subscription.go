@@ -4,6 +4,7 @@ import (
 	"github.com/gofiber/fiber/v3"
 	"github.com/rickferrdev/sublyra-api/internal/core/ports"
 	"github.com/rickferrdev/sublyra-api/internal/core/services/subscription"
+	"github.com/rickferrdev/sublyra-api/internal/inbound/http/rest/middlewares/guardtoken"
 	"go.uber.org/fx"
 )
 
@@ -17,6 +18,7 @@ type Controller struct {
 type FxParams struct {
 	fx.In
 
+	GuardToken  *guardtoken.Middleware
 	FiberRouter fiber.Router
 	Service     subscription.Interface
 }
@@ -28,9 +30,9 @@ func New(params FxParams) *Controller {
 	}
 
 	controller.router.Post("/subscription", controller.Subscription)
-	controller.router.Post("/subscription/confirm", controller.SubscriptionConfirm)
+	controller.router.Post("/subscription/confirm", params.GuardToken.GuardToken, controller.SubscriptionConfirm)
 	controller.router.Post("/unsubscription", controller.Unsubscription)
-	controller.router.Post("/unsubscription/confirm", controller.UnsubscriptionConfirm)
+	controller.router.Post("/unsubscription/confirm", params.GuardToken.GuardToken, controller.UnsubscriptionConfirm)
 
 	return controller
 }
@@ -41,7 +43,7 @@ func (controller *Controller) Subscription(c fiber.Ctx) error {
 		return ports.BadRequest(err)
 	}
 
-	if err := controller.service.RegisterSubscription(c.Context(), body.Email); err != nil {
+	if err := controller.service.RegisterSubscription(c.Context(), body.Email, body.Name); err != nil {
 		return err
 	}
 
@@ -52,12 +54,7 @@ func (controller *Controller) Subscription(c fiber.Ctx) error {
 }
 
 func (controller *Controller) SubscriptionConfirm(c fiber.Ctx) error {
-	token := c.Query("token")
-	if token == "" {
-		return ports.BadRequest(nil)
-	}
-
-	if err := controller.service.SubscriptionConfirm(c.Context(), token); err != nil {
+	if err := controller.service.SubscriptionConfirm(c.Context()); err != nil {
 		return err
 	}
 
@@ -84,12 +81,7 @@ func (controller *Controller) Unsubscription(c fiber.Ctx) error {
 }
 
 func (controller *Controller) UnsubscriptionConfirm(c fiber.Ctx) error {
-	token := c.Query("token")
-	if token == "" {
-		return ports.BadRequest(nil)
-	}
-
-	if err := controller.service.UnsubscriptionConfirm(c.Context(), token); err != nil {
+	if err := controller.service.UnsubscriptionConfirm(c.Context()); err != nil {
 		return err
 	}
 
