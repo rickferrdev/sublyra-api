@@ -1,0 +1,7 @@
+@import url("https://fonts.googleapis.com/css2?family=Fleur+De+Leah&display=swap");
+
+@import "tailwindcss";
+
+@theme {
+  --font-fleur: "Fleur De Leah", cursive;
+}

@@ -10,12 +10,17 @@ import (
 
 type (
 	SubscriptionSchema struct {
-		ID     bson.ObjectID             `bson:"_id"`
+		ID bson.ObjectID `bson:"_id"`
+
+		Name  domain.SubscriptionName  `bson:"name"`
+		Price domain.SubscriptionPrice `bson:"price"`
+
 		Email  string                    `bson:"email"`
 		Status domain.SubscriptionStatus `bson:"status"`
 
 		SubscribedAt   time.Time `bson:"subscribed_at,omitempty"`
 		UnsubscribedAt time.Time `bson:"unsubscribed_at,omitempty"`
+		ExpiresAt      time.Time `bson:"expires_at,omitempty"`
 
 		ConfirmationToken string `bson:"confirmation_token,omitempty"`
 		UnsubscribeToken  string `bson:"unsubscribe_token,omitempty"`
@@ -25,11 +30,15 @@ type (
 	}
 
 	SubscriptionUpdateSchema struct {
+		Name  *domain.SubscriptionName  `bson:"name,omitempty"`
+		Price *domain.SubscriptionPrice `bson:"price,omitempty"`
+
 		Email  *string                    `bson:"email,omitempty"`
 		Status *domain.SubscriptionStatus `bson:"status,omitempty"`
 
 		SubscribedAt   *time.Time `bson:"subscribed_at,omitempty"`
 		UnsubscribedAt *time.Time `bson:"unsubscribed_at,omitempty"`
+		ExpiresAt      *time.Time `bson:"expires_at,omitempty"`
 
 		ConfirmationToken *string `bson:"confirmation_token,omitempty"`
 		UnsubscribeToken  *string `bson:"unsubscribe_token,omitempty"`
@@ -68,10 +77,13 @@ func NewSubscriptionSchema(subscription domain.Subscription) (*SubscriptionSchem
 	}
 	return &SubscriptionSchema{
 		ID:                ID,
+		Name:              subscription.Name,
+		Price:             subscription.Price,
 		Email:             subscription.Email,
 		Status:            subscription.Status,
 		SubscribedAt:      subscription.SubscribedAt,
 		UnsubscribedAt:    subscription.UnsubscribedAt,
+		ExpiresAt:         subscription.ExpiresAt,
 		ConfirmationToken: subscription.ConfirmationToken,
 		UnsubscribeToken:  subscription.UnsubscribeToken,
 		CreatedAt:         subscription.CreatedAt,
@@ -122,10 +134,13 @@ func (schema *SubscriptionSchema) ToDomain() (*domain.Subscription, error) {
 	}
 	return &domain.Subscription{
 		ID:                schema.ID.Hex(),
+		Name:              schema.Name,
+		Price:             schema.Price,
 		Email:             schema.Email,
 		Status:            schema.Status,
 		SubscribedAt:      schema.SubscribedAt,
 		UnsubscribedAt:    schema.UnsubscribedAt,
+		ExpiresAt:         schema.ExpiresAt,
 		ConfirmationToken: schema.ConfirmationToken,
 		UnsubscribeToken:  schema.UnsubscribeToken,
 		CreatedAt:         schema.CreatedAt,

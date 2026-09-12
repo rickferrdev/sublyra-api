@@ -128,16 +128,13 @@ func (worker *Worker) RunTicker(ctx context.Context) {
 }
 
 func (worker *Worker) ProcessOnce(ctx context.Context) error {
-	outboxes, err := worker.database.BatchFindOutboxByStatus(ctx, domain.OutboxSubscriptionStatusPending, worker.batchSize)
-	if err != nil {
-		return ports.Internal(err)
-	}
-	if outboxes == nil {
-		return nil
-	}
-	for _, outbox := range outboxes {
-		if outbox.Status != domain.OutboxSubscriptionStatusPending {
-			continue
+	for index := 0; index < worker.batchSize; index++ {
+		outbox, err := worker.database.ClaimPendingOutbox(ctx, worker.maxAttempts)
+		if err != nil {
+			return ports.Internal(err)
+		}
+		if outbox == nil {
+			break
 		}
 		if !outbox.CanIncrementAttempts(worker.maxAttempts) {
 			if err = worker.MarkFailed(ctx, outbox.ID, "maximum number of attempts reached"); err != nil {

@@ -24,6 +24,7 @@ type (
 	}
 
 	RequestSubscriptionDTO struct {
+		Name  string `json:"name" validate:"oneof=Business Basic Pro"`
 		Email string `json:"email" validate:"required,email"`
 	}
 

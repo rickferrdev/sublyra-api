@@ -1,0 +1,21 @@
+info:
+  name: Subscription
+  type: http
+  seq: 1
+
+http:
+  method: POST
+  url: http://localhost:8080/api/v1/subscription
+  body:
+    type: json
+    data: |-
+      {
+        "email": "delivered@resend.dev"
+      }
+  auth: inherit
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5

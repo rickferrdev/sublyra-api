@@ -180,6 +180,7 @@ A aplicação declara automaticamente a topologia de mensageria durante a inicia
 | `OUTBOX_POLL_INTERVAL` | não | `2s` | Intervalo de polling do relay da outbox |
 | `OUTBOX_BATCH_SIZE` | não | `50` | Tamanho máximo do lote de eventos buscados na outbox |
 | `OUTBOX_MAX_ATTEMPTS` | não | `5` | Número máximo de tentativas de reprocessamento antes de marcar evento como `failed` |
+| `OUTBOX_TTL_SECONDS` | não | `604800` | Tempo de retenção TTL em segundos para eventos da outbox no MongoDB (padrão: 7 dias) |
 | `RABBITMQ_PREFETCH` | não | `5` | Limite de prefetch do consumidor no canal do RabbitMQ |
 
 Não versione credenciais reais. Use valores locais em `.env` e mantenha apenas placeholders em `.env.example`.
@@ -187,12 +188,13 @@ Não versione credenciais reais. Use valores locais em `.env` e mantenha apenas 
 ## Comandos de desenvolvimento
 
 ```bash
-make run    # go run ./cmd/api
-make test   # go test ./... -count=1
-make fmt    # go fmt ./...
-make tidy   # go mod tidy
-make lint   # golangci-lint run
-make build  # compila bin/api
+make run               # go run ./cmd/api
+make test              # go test ./...
+make test-integration  # go test -v -tags=integration ./...
+make fmt               # go fmt ./...
+make tidy              # go mod tidy
+make lint              # golangci-lint run
+make build             # compila bin/api
 ```
 
 ## Testes
@@ -203,11 +205,20 @@ Execute a suíte de testes unitários com:
 go test ./... -count=1 -cover
 ```
 
-A suíte de testes cobre a lógica do domínio, transições de estado, regras de cooldown, geração e validação de JWT, construção dos documentos da outbox, mappers de schema dos repositórios, declaração da topologia RabbitMQ e roteamento do publisher.
+Execute a suíte automatizada de testes de integração (utiliza `testcontainers-go` para subir containers efêmeros do MongoDB replica set e do RabbitMQ):
+
+```bash
+make test-integration
+# ou
+go test -v -tags=integration ./...
+```
+
+A suíte de testes unitários cobre a lógica do domínio, transições de estado, regras de cooldown, geração e validação de JWT, construção dos documentos da outbox, mappers de schema dos repositórios, declaração da topologia RabbitMQ e roteamento do publisher.
+A suíte de testes de integração valida as transações atômicas multi-documentos no MongoDB, o claiming atômico de eventos na outbox (`FindOneAndUpdate`) e a entrega de ponta a ponta na pipeline de mensageria do RabbitMQ.
 
 ## Infraestrutura Docker
 
-O Docker Compose provisiona todo o ambiente: MongoDB 8.0 como replica set de nó único, RabbitMQ 4 com painel de gerenciamento (Management UI) e o container da API.
+O Docker Compose provisiona todo o ambiente com Alta Disponibilidade pronta para produção: MongoDB 8.0 com replica set de 3 nós (`mongo1`, `mongo2`, `mongo3`), RabbitMQ 4 com painel de gerenciamento (Management UI) e o container da API.
 
 ```bash
 docker compose -f docker/docker-compose.yml up --build
@@ -215,14 +226,14 @@ docker compose -f docker/docker-compose.yml up --build
 
 Portas expostas:
 - **API**: `http://localhost:8080`
-- **MongoDB**: `localhost:27017`
+- **MongoDB Nó 1 (Primary/Secondary)**: `localhost:27017`
+- **MongoDB Nó 2 (Primary/Secondary)**: `localhost:27018`
+- **MongoDB Nó 3 (Primary/Secondary)**: `localhost:27019`
 - **RabbitMQ AMQP**: `localhost:5672`
 - **Painel de Gerenciamento RabbitMQ**: `http://localhost:15672` (credenciais: `guest` / `guest`)
 
-O estado do banco de dados e do broker de mensagens é persistido nos volumes nomeados `mongo_data` e `rabbitmq_data`. Para encerrar os serviços preservando os dados, execute `docker compose -f docker/docker-compose.yml down`. Adicione `--volumes` apenas se desejar excluir os dados locais.
+O estado do banco de dados e do broker de mensagens é persistido nos volumes nomeados `mongo1_data`, `mongo2_data`, `mongo3_data` e `rabbitmq_data`. Para encerrar os serviços preservando os dados, execute `docker compose -f docker/docker-compose.yml down`. Adicione `--volumes` apenas se desejar excluir os dados locais.
 
-## Limitações atuais e Próximos Passos
+## Status da Arquitetura
 
-- **Limpeza e Retenção da Outbox**: A exclusão ou arquivamento automatizado de eventos antigos marcados como `delivered` ou `failed` ainda não foi implementado.
-- **Lock Distribuído / Relay Concorrente**: O worker do relay de polling considera uma única instância ativa. O suporte a concorrência entre múltiplas instâncias do relay via locks atômicos no MongoDB é uma melhoria planejada.
-- **Testes de Integração Automatizados**: Testes de integração ponta a ponta usando testcontainers para MongoDB e RabbitMQ estão planejados.
+Todas as principais funcionalidades arquiteturais, Alta Disponibilidade do MongoDB em Replica Set (3 nós), políticas de CORS, retenção por índice TTL, Health Checks estruturados (`/health`), claiming atômico da outbox e testes de integração com `testcontainers-go` estão totalmente implementados e funcionais!

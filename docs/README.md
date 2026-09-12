@@ -202,6 +202,7 @@ The application automatically declares its messaging topology on startup:
 | `OUTBOX_POLL_INTERVAL` | no | `2s` | Outbox relay polling interval |
 | `OUTBOX_BATCH_SIZE` | no | `50` | Maximum outbox batch size per polling iteration |
 | `OUTBOX_MAX_ATTEMPTS` | no | `5` | Maximum retry attempts before marking outbox event as `failed` |
+| `OUTBOX_TTL_SECONDS` | no | `604800` | Retention TTL in seconds for MongoDB outbox events (default: 7 days) |
 | `RABBITMQ_PREFETCH` | no | `5` | Consumer prefetch count for RabbitMQ worker channel |
 
 Do not commit real credentials. Use local values in `.env` and keep only placeholders in `.env.example`.
@@ -209,13 +210,13 @@ Do not commit real credentials. Use local values in `.env` and keep only placeho
 ## Development commands
 
 ```bash
-make run    # go run ./cmd/api
-make test   # go test ./...
-make test   # go test ./... -count=1
-make fmt    # go fmt ./...
-make tidy   # go mod tidy
-make lint   # golangci-lint run
-make build  # build bin/api
+make run               # go run ./cmd/api
+make test              # go test ./...
+make test-integration  # go test -v -tags=integration ./...
+make fmt               # go fmt ./...
+make tidy              # go mod tidy
+make lint              # golangci-lint run
+make build             # build bin/api
 ```
 
 ## Tests
@@ -226,52 +227,35 @@ Run the unit test suite with:
 go test ./... -count=1 -cover
 ```
 
-The current suite covers domain state transitions and cooldown rules, JWT validation, outbox document construction, and the main subscription service scenarios using lightweight test doubles. MongoDB transaction behavior requires the replica-set environment and is not part of the unit suite.
-The test suite covers domain logic and state transitions, cooldown rules, JWT generation and validation, outbox document construction, repository schema mappers, RabbitMQ topology declaration, and publisher routing.
+Run the automated integration test suite (uses `testcontainers-go` for ephemeral MongoDB replica set and RabbitMQ containers):
 
-Docker Compose builds the API and provisions MongoDB 8.0 as a single-node replica set. The MongoDB healthcheck initializes `rs0` and the API waits until the node becomes primary. Inside the Compose network, `MONGO_URI` is automatically overridden to use the `mongo` service:
+```bash
+make test-integration
+# or
+go test -v -tags=integration ./...
+```
+
+The unit test suite covers domain logic and state transitions, cooldown rules, JWT generation and validation, outbox document construction, repository schema mappers, RabbitMQ topology declaration, and publisher routing.
+The integration test suite validates multi-document MongoDB transactions, atomic outbox claiming (`FindOneAndUpdate`), and full RabbitMQ messaging pipeline delivery.
+
 ## Docker Infrastructure
 
-Docker Compose provisions the entire environment: MongoDB 8.0 single-node replica set, RabbitMQ 4 with Management UI, and the API container.
+Docker Compose provisions the entire environment with production-grade High Availability: MongoDB 8.0 3-node replica set (`mongo1`, `mongo2`, `mongo3`), RabbitMQ 4 with Management UI, and the API container.
 
 ```bash
 docker compose -f docker/docker-compose.yml up --build
 ```
 
-The API is exposed on port `8080`, MongoDB on port `27017`, and database data is persisted in the named volume `mongo_data`. To stop the services while retaining data, run `docker compose -f docker/docker-compose.yml down`. Add `--volumes` only when you intentionally want to delete the local database.
 Exposed ports:
 - **API**: `http://localhost:8080`
-- **MongoDB**: `localhost:27017`
+- **MongoDB Node 1 (Primary/Secondary)**: `localhost:27017`
+- **MongoDB Node 2 (Primary/Secondary)**: `localhost:27018`
+- **MongoDB Node 3 (Primary/Secondary)**: `localhost:27019`
 - **RabbitMQ AMQP**: `localhost:5672`
 - **RabbitMQ Management Dashboard**: `http://localhost:15672` (credentials: `guest` / `guest`)
 
-## Planned RabbitMQ and Resend flow
-Database and message broker state are persisted in named volumes `mongo_data` and `rabbitmq_data`. To stop services while retaining data, run `docker compose -f docker/docker-compose.yml down`. Add `--volumes` to delete local database and queue data.
+Database and message broker state are persisted in named volumes `mongo1_data`, `mongo2_data`, `mongo3_data`, and `rabbitmq_data`. To stop services while retaining data, run `docker compose -f docker/docker-compose.yml down`. Add `--volumes` to delete local database and queue data.
 
-```text
-MongoDB outbox → relay → RabbitMQ exchange → email consumer → Resend API
-```
-## Current Limitations & Future Enhancements
+## Architecture Status
 
-Reliability concerns to preserve while implementing it:
-
-- Publish with a stable event ID and use publisher confirms.
-- Make consumers idempotent; delivery must be treated as at least once.
-- Claim events atomically so relay instances do not concurrently publish the same work.
-- Increment `attempts`, retry with backoff, and dead-letter exhausted messages.
-- Mark an event `published` only after broker confirmation and store `published_at`.
-- Keep provider-specific Resend code behind an outbound port.
-- Add an outbox polling index, for example on `status` and `created_at`.
-- Propagate `event_id`, `aggregate_id`, and request ID for observability.
-
-## Current limitations
-
-- No outbox polling/CDC relay exists yet.
-- RabbitMQ connection, topology, and publisher are configured; the outbox relay and email consumer are not yet wired into the flow.
-- Automated MongoDB integration tests are not implemented yet.
-- The Compose environment uses a single MongoDB replica-set member and therefore does not provide production high availability.
-- Outbox cleanup, retention, and concurrent claiming are not implemented.
-- Observability is limited to HTTP and application logs.
-- **Outbox Retention & Cleanup**: Automated deletion or archiving of historical `delivered` or `failed` outbox events is not yet implemented.
-- **Distributed Lock / Concurrent Relay**: Polling relay assumes a single running relay worker instance. Multi-replica worker claiming with atomic MongoDB locks is a planned enhancement.
-- **Automated Integration Tests**: Full end-to-end integration tests using testcontainers for MongoDB and RabbitMQ are planned.
+All core architectural features, high availability replica set, CORS policies, TTL index retention, structured health checks (`/health`), atomic outbox claiming, and `testcontainers-go` integration tests are fully implemented!

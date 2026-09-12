@@ -9,6 +9,7 @@ import (
 	"github.com/rickferrdev/sublyra-api/internal/core/domain"
 	"github.com/rickferrdev/sublyra-api/internal/core/ports"
 	"github.com/rickferrdev/sublyra-api/internal/core/services/subscription"
+	"github.com/rickferrdev/sublyra-api/internal/inbound/http/rest/constants"
 	dbsubscription "github.com/rickferrdev/sublyra-api/internal/outbound/mongodb/repositories/subscription"
 	"github.com/rickferrdev/sublyra-api/internal/platform/jwttoken"
 )
@@ -135,6 +136,10 @@ func (m *mockDatabase) IncrementAttempts(ctx context.Context, id string, reason 
 	return nil
 }
 
+func (m *mockDatabase) ClaimPendingOutbox(ctx context.Context, maxAttempts int) (*domain.OutboxSubscription, error) {
+	return nil, nil
+}
+
 func setupService() (*subscription.Service, *mockDatabase, jwttoken.Interface) {
 	db := newMockDatabase()
 	jwtPlatform := jwttoken.New(jwttoken.Params{
@@ -152,7 +157,7 @@ func TestRegisterSubscription(t *testing.T) {
 	svc, db, _ := setupService()
 
 	t.Run("new email registration", func(t *testing.T) {
-		err := svc.RegisterSubscription(ctx, "new@example.com")
+		err := svc.RegisterSubscription(ctx, "new@example.com", "blu")
 		if err != nil {
 			t.Fatalf("expected no error, got %v", err)
 		}
@@ -171,9 +176,10 @@ func TestRegisterSubscription(t *testing.T) {
 	t.Run("conflict when already subscribed", func(t *testing.T) {
 		db.subscriptions["active@example.com"] = &domain.Subscription{
 			Email:  "active@example.com",
+			Name:   domain.SubscriptionNameBasic,
 			Status: domain.SubscriptionStatusSubscribed,
 		}
-		err := svc.RegisterSubscription(ctx, "active@example.com")
+		err := svc.RegisterSubscription(ctx, "active@example.com", "blu")
 		if err == nil {
 			t.Fatal("expected conflict error, got nil")
 		}
@@ -200,6 +206,7 @@ func TestRegisterUnsubscription(t *testing.T) {
 	t.Run("subscribed user can request unsubscription", func(t *testing.T) {
 		db.subscriptions["subscribed@example.com"] = &domain.Subscription{
 			Email:  "subscribed@example.com",
+			Name:   domain.SubscriptionNameBasic,
 			Status: domain.SubscriptionStatusSubscribed,
 		}
 		err := svc.RegisterUnsubscription(ctx, "subscribed@example.com")
@@ -225,11 +232,18 @@ func TestSubscriptionConfirm(t *testing.T) {
 		}
 		db.subscriptions[email] = &domain.Subscription{
 			Email:             email,
+			Name:              domain.SubscriptionNameBasic,
 			Status:            domain.SubscriptionStatusPending,
 			ConfirmationToken: token,
 		}
 
-		err = svc.SubscriptionConfirm(ctx, token)
+		auth := constants.SubscriptionAuth{
+			Claims: &jwttoken.Claims{Data: email},
+			Token:  token,
+		}
+		testCtx := context.WithValue(ctx, constants.SUBSCRIPTION_AUTH_KEY, auth)
+
+		err = svc.SubscriptionConfirm(testCtx)
 		if err != nil {
 			t.Fatalf("expected confirmation success, got %v", err)
 		}
@@ -244,9 +258,9 @@ func TestSubscriptionConfirm(t *testing.T) {
 	})
 
 	t.Run("invalid token fails", func(t *testing.T) {
-		err := svc.SubscriptionConfirm(ctx, "invalid.jwt.token")
+		err := svc.SubscriptionConfirm(ctx)
 		if err == nil {
-			t.Fatal("expected unauthorized error for invalid token, got nil")
+			t.Fatal("expected unauthorized error for missing auth token in context, got nil")
 		}
 	})
 
@@ -257,11 +271,18 @@ func TestSubscriptionConfirm(t *testing.T) {
 
 		db.subscriptions[email] = &domain.Subscription{
 			Email:             email,
+			Name:              domain.SubscriptionNameBasic,
 			Status:            domain.SubscriptionStatusPending,
 			ConfirmationToken: token1,
 		}
 
-		err := svc.SubscriptionConfirm(ctx, token2)
+		auth := constants.SubscriptionAuth{
+			Claims: &jwttoken.Claims{Data: email},
+			Token:  token2,
+		}
+		testCtx := context.WithValue(ctx, constants.SUBSCRIPTION_AUTH_KEY, auth)
+
+		err := svc.SubscriptionConfirm(testCtx)
 		if err == nil {
 			t.Fatal("expected error for token mismatch, got nil")
 		}
@@ -283,11 +304,18 @@ func TestUnsubscriptionConfirm(t *testing.T) {
 		}
 		db.subscriptions[email] = &domain.Subscription{
 			Email:            email,
+			Name:             domain.SubscriptionNameBasic,
 			Status:           domain.SubscriptionStatusSubscribed,
 			UnsubscribeToken: token,
 		}
 
-		err = svc.UnsubscriptionConfirm(ctx, token)
+		auth := constants.SubscriptionAuth{
+			Claims: &jwttoken.Claims{Data: email},
+			Token:  token,
+		}
+		testCtx := context.WithValue(ctx, constants.SUBSCRIPTION_AUTH_KEY, auth)
+
+		err = svc.UnsubscriptionConfirm(testCtx)
 		if err != nil {
 			t.Fatalf("expected unsubscription confirmation success, got %v", err)
 		}

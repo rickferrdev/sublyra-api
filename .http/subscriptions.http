@@ -1,6 +1,12 @@
 @baseUrl = http://localhost:8080/api/v1
 @email = delivered@resend.dev
 
+###
+get http://localhost:8080/
+
+###
+GET http://localhost:8080/api/v1/health
+
 ### Request a subscription
 # @name requestSubscription
 POST {{baseUrl}}/subscription
@@ -8,6 +14,7 @@ Accept: application/json
 Content-Type: application/json
 
 {
+  "name": "Pro",
   "email": "{{email}}"
 }
 
