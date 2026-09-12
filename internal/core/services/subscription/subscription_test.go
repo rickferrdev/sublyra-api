@@ -176,6 +176,7 @@ func TestRegisterSubscription(t *testing.T) {
 	t.Run("conflict when already subscribed", func(t *testing.T) {
 		db.subscriptions["active@example.com"] = &domain.Subscription{
 			Email:  "active@example.com",
+			Name:   domain.SubscriptionNameBasic,
 			Status: domain.SubscriptionStatusSubscribed,
 		}
 		err := svc.RegisterSubscription(ctx, "active@example.com", "blu")
@@ -205,6 +206,7 @@ func TestRegisterUnsubscription(t *testing.T) {
 	t.Run("subscribed user can request unsubscription", func(t *testing.T) {
 		db.subscriptions["subscribed@example.com"] = &domain.Subscription{
 			Email:  "subscribed@example.com",
+			Name:   domain.SubscriptionNameBasic,
 			Status: domain.SubscriptionStatusSubscribed,
 		}
 		err := svc.RegisterUnsubscription(ctx, "subscribed@example.com")
@@ -230,6 +232,7 @@ func TestSubscriptionConfirm(t *testing.T) {
 		}
 		db.subscriptions[email] = &domain.Subscription{
 			Email:             email,
+			Name:              domain.SubscriptionNameBasic,
 			Status:            domain.SubscriptionStatusPending,
 			ConfirmationToken: token,
 		}
@@ -268,6 +271,7 @@ func TestSubscriptionConfirm(t *testing.T) {
 
 		db.subscriptions[email] = &domain.Subscription{
 			Email:             email,
+			Name:              domain.SubscriptionNameBasic,
 			Status:            domain.SubscriptionStatusPending,
 			ConfirmationToken: token1,
 		}
@@ -300,6 +304,7 @@ func TestUnsubscriptionConfirm(t *testing.T) {
 		}
 		db.subscriptions[email] = &domain.Subscription{
 			Email:            email,
+			Name:             domain.SubscriptionNameBasic,
 			Status:           domain.SubscriptionStatusSubscribed,
 			UnsubscribeToken: token,
 		}
